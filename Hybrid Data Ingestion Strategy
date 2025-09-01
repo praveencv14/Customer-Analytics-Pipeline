@@ -1,0 +1,21 @@
+Batch (legacy transactions):
+
+AWS: Source DB → AWS DMS (CDC) → S3 (Parquet) → Snowflake Snowpipe auto-ingest → RAW.ORDERS/PRODUCTS/CUSTOMERS.
+
+Azure: Source DB → Azure Data Factory → ADLS Gen2 → Event Grid → Snowpipe → RAW.*.
+
+OCI: Source DB → OCI Data Integration / GoldenGate → OCI Object Storage → Snowpipe → RAW.*.
+
+Real-time (clickstream):
+
+Web/App → Kinesis or Kafka → Snowpipe Streaming (or Kafka Connector) → RAW.CLICKS_STREAM.
+
+Optional enrichment with Flink/Kinesis Analytics.
+
+Transform & Orchestrate:
+
+dbt: RAW → STAGING → ANALYTICS (tests + docs).
+
+Airflow: schedules, backfills, DQ, alerts.
+
+Cost & freshness: Parquet, auto-suspend warehouses, right-size compute; use streaming for sub-minute click freshness, daily/batch for ERP stability.
