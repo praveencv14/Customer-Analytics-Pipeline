@@ -1,0 +1,12 @@
+with src as (
+  select
+    cast(customer_id as number)       as customer_id,
+    initcap(trim(customer_name))      as customer_name,
+    lower(trim(email))                as email,
+    coalesce(upper(segment),'B2C')    as segment,
+    upper(country)                    as country,
+    initcap(city)                     as city,
+    to_number(to_char(signup_date,'YYYYMMDD')) as signup_date_key
+  from RAW.CUSTOMERS
+)
+select * from src;
