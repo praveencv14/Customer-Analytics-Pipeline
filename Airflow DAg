@@ -1,0 +1,178 @@
+from datetime import datetime
+from airflow import DAG
+from airflow.operators.bash import BashOperator
+from airflow.operators.python import PythonOperator
+import logging
+
+def simulate_ingest():
+    print("Raw data ingested into RAW schema.")
+
+def dq_checks_and_impute():
+    """
+    Advanced data quality:
+    1) Anomaly detection on unit_price using IQR per product.
+    2) Referential integrity: verify fact->dim keys.
+    3) If anomalies, log alerts and impute price to product median; quarantine RI failures.
+    """
+    import os
+    import snowflake.connector
+
+    conn = snowflake.connector.connect(
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        user=os.environ["SNOWFLAKE_USER"],
+        password=os.environ["SNOWFLAKE_PASSWORD"],
+        warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+        database=os.environ["SNOWFLAKE_DATABASE"],
+        schema="ANALYTICS",
+        role=os.environ.get("SNOWFLAKE_ROLE")
+    )
+    cur = conn.cursor()
+
+    cur.execute("""
+    create table if not exists ANALYTICS.DATA_QUALITY_ALERTS (
+      alert_ts timestamp default current_timestamp(),
+      alert_type string,
+      order_id number,
+      order_line_id number,
+      product_id number,
+      customer_id number,
+      issue string,
+      suggestion string
+    );
+    """)
+
+    # IQR outliers per product (unit_price)
+    cur.execute("""
+    with stats as (
+      select
+        product_id,
+        percentile_cont(0.25) within group (order by unit_price) as q1,
+        percentile_cont(0.50) within group (order by unit_price) as med,
+        percentile_cont(0.75) within group (order by unit_price) as q3
+      from ANALYTICS.FACT_ORDERS
+      group by product_id
+    ),
+    bounds as (
+      select product_id,
+             q1, med, q3,
+             q1 - 1.5*(q3 - q1) as lower_b,
+             q3 + 1.5*(q3 - q1) as upper_b
+      from stats
+    ),
+    flagged as (
+      select f.order_id, f.order_line_id, f.product_id, f.customer_id, f.unit_price, b.med, b.lower_b, b.upper_b
+      from ANALYTICS.FACT_ORDERS f
+      join bounds b using(product_id)
+      where f.unit_price < b.lower_b or f.unit_price > b.upper_b
+    )
+    insert into ANALYTICS.DATA_QUALITY_ALERTS (alert_type, order_id, order_line_id, product_id, customer_id, issue, suggestion)
+    select
+      'ANOMALY_UNIT_PRICE',
+      order_id, order_line_id, product_id, customer_id,
+      'Unit price outlier: ' || unit_price || ' not in [' || lower_b || ',' || upper_b || ']',
+      'Impute to product median: ' || med
+    from flagged;
+    """)
+
+    # Impute outliers to product median (demo)
+    cur.execute("""
+    update ANALYTICS.FACT_ORDERS f
+    set unit_price = b.med,
+        extended_amount = round(f.quantity * b.med * (1 - f.discount/100), 2)
+    from (
+      with stats as (
+        select product_id,
+          percentile_cont(0.25) within group (order by unit_price) as q1,
+          percentile_cont(0.50) within group (order by unit_price) as med,
+          percentile_cont(0.75) within group (order by unit_price) as q3
+        from ANALYTICS.FACT_ORDERS
+        group by product_id
+      ),
+      bounds as (
+        select product_id, q1, med, q3,
+               q1 - 1.5*(q3 - q1) as lower_b,
+               q3 + 1.5*(q3 - q1) as upper_b
+        from stats
+      )
+      select f.order_id, f.order_line_id, f.product_id, b.med, b.lower_b, b.upper_b
+      from ANALYTICS.FACT_ORDERS f
+      join bounds b using(product_id)
+      where f.unit_price < b.lower_b or f.unit_price > b.upper_b
+    ) b
+    where f.order_id = b.order_id and f.order_line_id = b.order_line_id;
+    """)
+
+    # Referential integrity: product/customer must exist
+    cur.execute("""
+    insert into ANALYTICS.DATA_QUALITY_ALERTS (alert_type, order_id, order_line_id, product_id, customer_id, issue, suggestion)
+    with f as (select * from ANALYTICS.FACT_ORDERS),
+    prod_missing as (
+      select f.*
+      from f left join ANALYTICS.DIM_PRODUCTS p using(product_id)
+      where p.product_id is null
+    ),
+    cust_missing as (
+      select f.*
+      from f left join ANALYTICS.DIM_CUSTOMERS c using(customer_id)
+      where c.customer_id is null
+    )
+    select 'MISSING_PRODUCT', order_id, order_line_id, product_id, customer_id,
+           'No matching product in DIM_PRODUCTS', 'Create product or correct product_id'
+    from prod_missing
+    union all
+    select 'MISSING_CUSTOMER', order_id, order_line_id, product_id, customer_id,
+           'No matching customer in DIM_CUSTOMERS', 'Create customer or correct customer_id'
+    from cust_missing;
+    """)
+
+    # Quarantine & remove invalid rows from main fact (demo)
+    cur.execute("""create table if not exists ANALYTICS.FACT_ORDERS_QUARANTINE like ANALYTICS.FACT_ORDERS;""")
+    cur.execute("""
+    insert into ANALYTICS.FACT_ORDERS_QUARANTINE
+    select f.*
+    from ANALYTICS.FACT_ORDERS f
+    where not exists (select 1 from ANALYTICS.DIM_PRODUCTS p where p.product_id = f.product_id)
+       or not exists (select 1 from ANALYTICS.DIM_CUSTOMERS c where c.customer_id = f.customer_id);
+    """)
+    cur.execute("""
+    delete from ANALYTICS.FACT_ORDERS f
+    where not exists (select 1 from ANALYTICS.DIM_PRODUCTS p where p.product_id = f.product_id)
+       or not exists (select 1 from ANALYTICS.DIM_CUSTOMERS c where c.customer_id = f.customer_id);
+    """)
+
+    cur.close()
+    conn.close()
+    logging.info("Advanced DQ complete: anomalies flagged, imputed, RI enforced, quarantine logged.")
+
+def pipeline_complete():
+    print("Data pipeline complete.")
+
+with DAG(
+    dag_id="customer_analytics_pipeline",
+    start_date=datetime(2025, 8, 1),
+    schedule=None,
+    catchup=False,
+    tags=["dbt","snowflake","dq"]
+) as dag:
+
+    ingest = PythonOperator(
+        task_id="simulate_ingest_raw",
+        python_callable=simulate_ingest
+    )
+
+    dbt_run = BashOperator(
+        task_id="dbt_run",
+        bash_command="cd /opt/airflow/dbt && dbt deps && dbt run --project-dir . --profiles-dir . && dbt test --project-dir . --profiles-dir ."
+    )
+
+    dq = PythonOperator(
+        task_id="advanced_data_quality_and_imputation",
+        python_callable=dq_checks_and_impute
+    )
+
+    done = PythonOperator(
+        task_id="pipeline_complete",
+        python_callable=pipeline_complete
+    )
+
+    ingest >> dbt_run >> dq >> done
