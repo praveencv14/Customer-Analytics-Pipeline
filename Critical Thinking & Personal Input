@@ -1,0 +1,21 @@
+Where I added unique value (specific challenges & fixes):
+
+Secrets & profiles: AI’s examples hardcoded creds.
+My fix: Env-var driven config; .gitignore for secrets; production note to use Airflow Connections.
+Reasoning: Security-by-default, CI/CD ready.
+
+Deterministic DAG: AI DAG lacked robust ordering & failure behavior.
+My fix: Explicit ingest → dbt → DQ → complete chain with testable PythonOperator for DQ.
+Reasoning: Easier debugging, safer remediation slot.
+
+Outlier method choice: AI leaned to z-score.
+My fix: IQR per product + median imputation.
+Reasoning: Robust for skew; transparent for stakeholders.
+
+Referential integrity policy:
+My fix: Alert + quarantine invalid rows instead of failing pipeline.
+Reasoning: Keeps analytics usable; issues are visible and traceable.
+
+Measure consistency:
+My fix: Compute extended_amount in dbt and persist in fact.
+Reasoning: Single source of truth across tools.
