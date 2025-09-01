@@ -1,0 +1,19 @@
+name: customer_analytics
+version: 1.0.0
+profile: customer_analytics_profile
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  customer_analytics:
+    +materialized: view
+    staging:
+      +schema: STAGING
+      +tags: ["staging"]
+    marts:
+      +schema: ANALYTICS
+      +tags: ["marts"]
