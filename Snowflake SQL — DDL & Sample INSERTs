@@ -1,0 +1,93 @@
+-- Create schema for analytics (final star)
+CREATE SCHEMA IF NOT EXISTS ANALYTICS;
+
+-- ========== DIMENSIONS ==========
+CREATE OR REPLACE TABLE ANALYTICS.DIM_CUSTOMERS (
+  customer_id       NUMBER       NOT NULL,
+  customer_name     STRING,
+  email             STRING,
+  segment           STRING,
+  country           STRING,
+  city              STRING,
+  signup_date_key   NUMBER,             -- YYYYMMDD
+  CONSTRAINT PK_DIM_CUSTOMERS PRIMARY KEY (customer_id)
+);
+
+CREATE OR REPLACE TABLE ANALYTICS.DIM_PRODUCTS (
+  product_id        NUMBER       NOT NULL,
+  product_name      STRING,
+  category          STRING,
+  subcategory       STRING,
+  unit_price        NUMBER(10,2),
+  active_flag       BOOLEAN,
+  CONSTRAINT PK_DIM_PRODUCTS PRIMARY KEY (product_id)
+);
+
+CREATE OR REPLACE TABLE ANALYTICS.DIM_DATE (
+  date_key          NUMBER       NOT NULL, -- YYYYMMDD
+  full_date         DATE         NOT NULL,
+  year              NUMBER       NOT NULL,
+  quarter           NUMBER       NOT NULL,
+  month             NUMBER       NOT NULL,
+  day               NUMBER       NOT NULL,
+  day_of_week       STRING       NOT NULL,
+  is_weekend        BOOLEAN      NOT NULL,
+  CONSTRAINT PK_DIM_DATE PRIMARY KEY (date_key)
+);
+
+-- ========== FACT ==========
+CREATE OR REPLACE TABLE ANALYTICS.FACT_ORDERS (
+  order_id          NUMBER       NOT NULL,
+  order_line_id     NUMBER       NOT NULL,
+  customer_id       NUMBER       NOT NULL,
+  product_id        NUMBER       NOT NULL,
+  order_date_key    NUMBER       NOT NULL,
+  quantity          NUMBER(10,2) NOT NULL,
+  unit_price        NUMBER(10,2) NOT NULL,
+  discount          NUMBER(5,2)  DEFAULT 0,     -- percent
+  extended_amount   NUMBER(12,2),               -- computed in dbt/selects
+  status            STRING       DEFAULT 'COMPLETED',
+  channel           STRING,                      -- WEB, MOBILE, SUPPORT, etc.
+  CONSTRAINT PK_FACT_ORDERS PRIMARY KEY (order_id, order_line_id),
+  CONSTRAINT FK_FACT_CUSTOMER FOREIGN KEY (customer_id) REFERENCES ANALYTICS.DIM_CUSTOMERS(customer_id),
+  CONSTRAINT FK_FACT_PRODUCT  FOREIGN KEY (product_id)  REFERENCES ANALYTICS.DIM_PRODUCTS(product_id),
+  CONSTRAINT FK_FACT_DATE     FOREIGN KEY (order_date_key) REFERENCES ANALYTICS.DIM_DATE(date_key)
+);
+
+-- ========== SAMPLE DATA ==========
+-- DIM_DATE
+INSERT INTO ANALYTICS.DIM_DATE (date_key, full_date, year, quarter, month, day, day_of_week, is_weekend) VALUES
+ (20250825, '2025-08-25', 2025, 3, 8, 25, 'MON', FALSE),
+ (20250826, '2025-08-26', 2025, 3, 8, 26, 'TUE', FALSE),
+ (20250827, '2025-08-27', 2025, 3, 8, 27, 'WED', FALSE),
+ (20250830, '2025-08-30', 2025, 3, 8, 30, 'SAT', TRUE),
+ (20250831, '2025-08-31', 2025, 3, 8, 31, 'SUN', TRUE);
+
+-- DIM_CUSTOMERS
+INSERT INTO ANALYTICS.DIM_CUSTOMERS (customer_id, customer_name, email, segment, country, city, signup_date_key) VALUES
+ (101, 'Alice Smith', 'alice@example.com', 'B2C', 'UK', 'London', 20250825),
+ (102, 'Bob Jones',   'bob@example.com',   'B2C', 'UK', 'Manchester', 20250826),
+ (103, 'Chandra V',   'chandra@example.com','B2C','UK','Birmingham', 20250827),
+ (104, 'Diego Lopez', 'diego@example.com', 'B2C', 'ES', 'Madrid', 20250825),
+ (105, 'Emily Chen',  'emily@example.com', 'B2C', 'US', 'New York', 20250826);
+
+-- DIM_PRODUCTS
+INSERT INTO ANALYTICS.DIM_PRODUCTS (product_id, product_name, category, subcategory, unit_price, active_flag) VALUES
+ (201, 'Wireless Mouse', 'Electronics', 'Accessories', 19.99, TRUE),
+ (202, 'Mechanical Keyboard', 'Electronics', 'Accessories', 89.99, TRUE),
+ (203, 'USB-C Cable', 'Electronics', 'Cables', 9.99, TRUE),
+ (204, 'Noise-Cancel Headphones', 'Electronics', 'Audio', 199.99, TRUE),
+ (205, 'Laptop Stand', 'Office', 'Ergonomics', 29.99, TRUE);
+
+-- FACT_ORDERS (8 lines; includes anomalies to trigger DQ)
+INSERT INTO ANALYTICS.FACT_ORDERS (order_id, order_line_id, customer_id, product_id, order_date_key, quantity, unit_price, discount, extended_amount, status, channel) VALUES
+ (5001, 1, 101, 201, 20250825, 1, 19.99, 0, ROUND(1*19.99*(1-0/100),2), 'COMPLETED', 'WEB'),
+ (5001, 2, 101, 203, 20250825, 2,  9.99, 0, ROUND(2*9.99*(1-0/100),2),  'COMPLETED', 'WEB'),
+ (5002, 1, 102, 202, 20250826, 1, 89.99, 10, ROUND(1*89.99*(1-10/100),2),'COMPLETED', 'MOBILE'),
+ (5003, 1, 103, 205, 20250827, 1, 29.99, 0, ROUND(1*29.99*(1-0/100),2), 'COMPLETED', 'WEB'),
+ (5004, 1, 104, 204, 20250830, 1,199.99, 5, ROUND(1*199.99*(1-5/100),2),'COMPLETED', 'WEB'),
+ (5005, 1, 105, 201, 20250831, 3, 19.99, 0, ROUND(3*19.99*(1-0/100),2), 'COMPLETED', 'SUPPORT'),
+ -- anomaly: extreme unit_price to trigger outlier detection
+ (5006, 1, 105, 203, 20250831, 1, 999.99, 0, ROUND(1*999.99*(1-0/100),2), 'COMPLETED', 'WEB'),
+ -- referential issue: bad product_id
+ (5007, 1, 101, 999, 20250831, 1, 10.00, 0, 10.00, 'COMPLETED', 'WEB');
