@@ -1,0 +1,18 @@
+What it checks (beyond NOT NULL):
+
+Anomaly detection (IQR) — per product, flag unit_price outside [Q1−1.5*IQR, Q3+1.5*IQR].
+
+Referential integrity — ensure every customer_id/product_id in the fact exists in the corresponding dim.
+
+Remediation —
+
+Log alerts to ANALYTICS.DATA_QUALITY_ALERTS with human-readable next steps.
+
+Impute outlier unit_price to median per product (demo choice; could use catalog price).
+
+Quarantine RI failures into FACT_ORDERS_QUARANTINE, remove from main fact to avoid polluting metrics.
+
+The full Python is embedded in the Airflow DAG above (dq_checks_and_impute()).
+
+Why IQR + median?
+More robust than z-score for skewed, non-normal price distributions; median imputation is simple, explainable, and safe.
