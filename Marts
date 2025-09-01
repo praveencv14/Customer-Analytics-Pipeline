@@ -1,0 +1,16 @@
+select * from {{ ref('stg_customers') }};
+select * from {{ ref('stg_products') }};
+select * from {{ ref('stg_date') }};
+select
+  o.order_id,
+  o.order_line_id,
+  o.customer_id,
+  o.product_id,
+  o.order_date_key,
+  o.quantity,
+  o.unit_price,
+  o.discount,
+  round(o.quantity * o.unit_price * (1 - o.discount/100), 2) as extended_amount,
+  o.status,
+  o.channel
+from {{ ref('stg_orders') }} o;
