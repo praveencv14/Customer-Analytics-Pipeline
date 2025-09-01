@@ -1,0 +1,16 @@
+
+ChatGPT (GPT-5 Thinking):
+
+Generated initial Snowflake DDL and sample INSERTs for the star schema.
+
+Produced dbt staging patterns (casts, renames) and marts skeletons.
+
+Drafted Airflow DAG skeleton (operators + dependencies).
+
+GitHub Copilot:
+
+Autocompleted repetitive SQL casts, YAML (dbt_project.yml, tests), and small Python edits.
+
+Perplexity AI:
+
+Confirmed Snowflake percentile functions and validated IQR approach; compared Snowpipe vs Snowpipe Streaming trade-offs.
