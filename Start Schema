@@ -1,0 +1,8 @@
+                  Dim_Date
+                (date_key PK)
+                    |
+                    | (order_date_key FK)
+Dim_Customers -- FACT_ORDERS -- Dim_Products
+customer_id PK      |         product_id PK
+                     \
+                      measures: quantity, unit_price, discount, extended_amount
