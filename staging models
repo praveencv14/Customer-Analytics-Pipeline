@@ -1,3 +1,4 @@
+#customers
 with src as (
   select
     cast(customer_id as number)       as customer_id,
@@ -10,3 +11,51 @@ with src as (
   from RAW.CUSTOMERS
 )
 select * from src;
+
+#products
+with src as (
+  select
+    cast(product_id as number)         as product_id,
+    initcap(trim(product_name))        as product_name,
+    initcap(category)                  as category,
+    initcap(subcategory)               as subcategory,
+    cast(unit_price as number(10,2))   as unit_price,
+    cast(active_flag as boolean)       as active_flag
+  from RAW.PRODUCTS
+)
+select * from src;
+
+#orders
+with src as (
+  select
+    cast(order_id as number)             as order_id,
+    cast(order_line_id as number)        as order_line_id,
+    cast(customer_id as number)          as customer_id,
+    cast(product_id as number)           as product_id,
+    to_number(to_char(order_date,'YYYYMMDD')) as order_date_key,
+    cast(quantity as number(10,2))       as quantity,
+    cast(unit_price as number(10,2))     as unit_price,
+    coalesce(cast(discount as number(5,2)),0) as discount,
+    coalesce(status,'COMPLETED')         as status,
+    coalesce(channel,'WEB')              as channel
+  from RAW.ORDERS
+)
+select * from src;
+
+#date
+-- Build from RAW.DATE_DIM or derive from orders if needed
+with base as (
+  select distinct to_date(order_date) as d
+  from RAW.ORDERS
+)
+select
+  to_number(to_char(d,'YYYYMMDD'))     as date_key,
+  d                                    as full_date,
+  year(d)                              as year,
+  quarter(d)                           as quarter,
+  month(d)                             as month,
+  day(d)                               as day,
+  to_char(d,'DY')                      as day_of_week,
+  case when dayofweekiso(d) in (6,7) then true else false end as is_weekend
+from base;
+
